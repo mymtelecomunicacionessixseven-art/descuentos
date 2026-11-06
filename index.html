@@ -81,6 +81,16 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
   </nav>
 </header>
 <main>
+<div class="tarjeta noimprimir oculto" id="candado">
+  <h2>Datos de técnicos protegidos</h2>
+  <p class="nota">Los nombres, DNI y la firma de Gerencia están cifrados. Ingresa la clave para cargarlos en este navegador.</p>
+  <form id="fCandado" class="acciones" autocomplete="off">
+    <input type="password" id="cClave" placeholder="Clave" style="max-width:260px" required>
+    <label style="display:flex;gap:6px;align-items:center;margin:0;font-size:13px"><input type="checkbox" id="cRecordar" style="width:auto" checked> Recordar en este navegador</label>
+    <button class="b">Desbloquear</button>
+    <span id="cMsg" class="nota" style="color:var(--mal)"></span>
+  </form>
+</div>
 
 <!-- ============ NUEVA ============ -->
 <section id="v-nueva">
@@ -300,7 +310,7 @@ function llenarSelects() {
   const ops = tecnicos().map(t => `<option>${esc(t)}</option>`).join('');
   const op = t => `<option>${esc(t)}</option>`;
   const activos = tecnicos().filter(t => fichaTec(t).situacion !== 'Baja'), baja = tecnicos().filter(t => fichaTec(t).situacion === 'Baja');
-  $('#fTec').innerHTML = (ops ? '<option value="">— Elegir —</option>' : '<option value="">— Carga el archivo de técnicos en "Técnicos y catálogo" —</option>')
+  $('#fTec').innerHTML = (ops ? '<option value="">— Elegir —</option>' : '<option value="">— Sin técnicos: desbloquea con la clave —</option>')
     + (baja.length ? `<optgroup label="Activos">${activos.map(op).join('')}</optgroup><optgroup label="De baja">${baja.map(op).join('')}</optgroup>` : ops);
   $('#rTec').innerHTML = '<option value="">Todos los técnicos</option>' + ops;
   $('#dlItems').innerHTML = catalogo().map(i => `<option value="${esc(i.codigo + ' · ' + i.descripcion)}">${esc(i.tipo)}${i.precio ? ' · S/ ' + soles(i.precio) : ''}</option>`).join('');
@@ -661,6 +671,39 @@ $('#fRespaldo').onchange = async e => {
   e.target.value = '';
 };
 
+// ---------- Datos cifrados (privado.enc: AES-GCM, clave derivada con PBKDF2-SHA256) ----------
+const CLAVE_RECORDADA = 'mym.descuentos.clave';
+const bytes = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+let cifrado = null;
+async function descifrar(clave) {
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(clave), 'PBKDF2', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt: bytes(cifrado.salt), iterations: cifrado.it, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+  return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes(cifrado.iv) }, key, bytes(cifrado.data))));
+}
+async function desbloquear(clave, recordar) {
+  const x = await descifrar(clave);
+  for (const [t, f] of Object.entries(x.tecnicos || {})) E.tecnicos[t] = { ...(E.tecnicos[t] || {}), ...f };
+  if (x.firmaGG) E.firmaGG = x.firmaGG;
+  E.privadoIv = cifrado.iv;
+  guardar();
+  try { if (recordar) localStorage.setItem(CLAVE_RECORDADA, clave); else localStorage.removeItem(CLAVE_RECORDADA); } catch (e) {}
+  $('#candado').classList.add('oculto');
+  llenarSelects(); pintarForm();
+  if (vistaActual === 'catalogo') pintarCatalogo();
+}
+$('#fCandado').onsubmit = async e => {
+  e.preventDefault();
+  $('#cMsg').textContent = 'Abriendo…';
+  try { await desbloquear($('#cClave').value, $('#cRecordar').checked); $('#cClave').value = ''; $('#cMsg').textContent = ''; }
+  catch (err) { $('#cMsg').textContent = err && err.name === 'OperationError' ? 'Clave incorrecta.' : 'No se pudo abrir (' + (err.message || err) + ').'; }
+};
+async function revisarCifrado() {
+  try { const r = await fetch('privado.enc', { cache: 'no-store' }); if (!r.ok) return; cifrado = await r.json(); } catch (e) { return; }
+  let g = null; try { g = localStorage.getItem(CLAVE_RECORDADA); } catch (e) {}
+  if (g) { try { await desbloquear(g, true); return; } catch (e) { localStorage.removeItem(CLAVE_RECORDADA); } }
+  if (E.privadoIv !== cifrado.iv) $('#candado').classList.remove('oculto');
+}
+
 // ---------- Inicio ----------
 function inicio() {
   const h = location.hash;
@@ -674,6 +717,7 @@ function inicio() {
     } catch (e) { alert('El enlace de firma está incompleto o dañado.'); }
   }
   llenarSelects(); pintarForm(); repartir();
+  revisarCifrado();
 }
 inicio();
 </script>
