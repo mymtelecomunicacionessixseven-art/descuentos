@@ -81,7 +81,8 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
   </nav>
 </header>
 <main>
-<div class="tarjeta noimprimir oculto" id="candado">
+<dialog id="candado" class="noimprimir" style="max-width:460px;width:94%;border:1px solid var(--borde);border-radius:12px;padding:22px">
+  <img src="" id="cLogo" alt="" style="display:block;width:130px;margin:0 auto 8px">
   <h2>Datos de técnicos protegidos</h2>
   <p class="nota">Los nombres, DNI y la firma de Gerencia están cifrados. Ingresa la clave para cargarlos en este navegador.</p>
   <form id="fCandado" class="acciones" autocomplete="off">
@@ -90,14 +91,15 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
     <button class="b">Desbloquear</button>
     <span id="cMsg" class="nota" style="color:var(--mal)"></span>
   </form>
-</div>
+  <p class="nota" style="margin-top:12px"><a href="#" id="cLuego">Seguir sin técnicos</a> (solo para revisar el catálogo)</p>
+</dialog>
 
 <!-- ============ NUEVA ============ -->
 <section id="v-nueva">
   <div class="tarjeta">
     <h2 id="tituloForm">Nueva notificación de descuento</h2>
     <div class="fila">
-      <div><label>Técnico</label><select id="fTec"></select></div>
+      <div><label>Técnico <a href="#" id="lnkDesbloquear" class="oculto">· desbloquear técnicos</a></label><select id="fTec"></select></div>
       <div><label>DNI</label><input id="fDni" inputmode="numeric" maxlength="12"></div>
       <div><label>Cargo</label><input id="fCargo" placeholder="Técnico instalador"></div>
       <div><label>Fecha del documento</label><input id="fFecha" type="date"></div>
@@ -687,7 +689,8 @@ async function desbloquear(clave, recordar) {
   E.privadoIv = cifrado.iv;
   guardar();
   try { if (recordar) localStorage.setItem(CLAVE_RECORDADA, clave); else localStorage.removeItem(CLAVE_RECORDADA); } catch (e) {}
-  $('#candado').classList.add('oculto');
+  if ($('#candado').open) $('#candado').close();
+  $('#lnkDesbloquear').classList.add('oculto');
   llenarSelects(); pintarForm();
   if (vistaActual === 'catalogo') pintarCatalogo();
 }
@@ -701,8 +704,18 @@ async function revisarCifrado() {
   try { const r = await fetch('privado.enc', { cache: 'no-store' }); if (!r.ok) return; cifrado = await r.json(); } catch (e) { return; }
   let g = null; try { g = localStorage.getItem(CLAVE_RECORDADA); } catch (e) {}
   if (g) { try { await desbloquear(g, true); return; } catch (e) { localStorage.removeItem(CLAVE_RECORDADA); } }
-  if (E.privadoIv !== cifrado.iv) $('#candado').classList.remove('oculto');
+  // Se pide la clave si aún no hay técnicos o si el archivo cifrado cambió desde la última vez.
+  if (E.privadoIv !== cifrado.iv || !tecnicos().length) pedirClave();
 }
+function pedirClave() {
+  if (!cifrado) return;
+  $('#cLogo').src = LOGO.startsWith('data:') ? LOGO : '';
+  $('#lnkDesbloquear').classList.remove('oculto');
+  if (!$('#candado').open) $('#candado').showModal();
+  $('#cClave').focus();
+}
+$('#cLuego').onclick = e => { e.preventDefault(); $('#candado').close(); };
+$('#lnkDesbloquear').onclick = e => { e.preventDefault(); pedirClave(); };
 
 // ---------- Inicio ----------
 function inicio() {
