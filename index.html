@@ -178,7 +178,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
   <div class="tarjeta">
     <h2>Técnicos</h2>
     <p class="nota">Nombres tomados del reporte de consumo de materiales. Completa DNI y cargo una vez; se reutilizan en cada notificación.</p>
-    <table id="tTecs"><thead><tr><th>Técnico</th><th>DNI</th><th>Cargo</th><th>Situación</th><th></th></tr></thead><tbody></tbody></table>
+    <table id="tTecs"><thead><tr><th>Técnico</th><th>DNI</th><th>Cargo</th><th>Celular / WhatsApp</th><th>Correo</th><th>Situación</th></tr></thead><tbody></tbody></table>
     <div class="acciones" style="margin-top:10px"><input id="nTec" placeholder="APELLIDOS, NOMBRES" style="max-width:340px"><button class="b sec" id="btnNuevoTec">Agregar técnico</button></div>
   </div>
   <div class="tarjeta">
@@ -207,9 +207,23 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
   <div class="acciones noimprimir" style="max-width:820px;margin:0 auto 12px">
     <button class="b sec" id="btnVolver">← Volver</button>
     <button class="b sec" id="btnImprimir">Imprimir / PDF</button>
-    <button class="b sec" id="btnEnlace">Copiar enlace de firma remota</button>
     <button class="b sec" id="btnEditar">Editar</button>
     <button class="b mal" id="btnAnular">Anular</button>
+  </div>
+  <div class="firmar noimprimir tarjeta" id="panelEnvio">
+    <h2>Enviar enlace de firma al técnico</h2>
+    <div class="fila">
+      <div><label>Celular / WhatsApp del técnico</label><input id="eCel" type="tel" inputmode="tel" placeholder="987 654 321"></div>
+      <div><label>Correo del técnico</label><input id="eCorreo" type="email" placeholder="tecnico@correo.com"></div>
+      <div><label>WhatsApp de la oficina (recibe la constancia)</label><input id="eOfi" type="tel" inputmode="tel" placeholder="987 654 321"></div>
+    </div>
+    <div class="acciones">
+      <button class="b" id="btnWa" style="background:#1f9d55;border-color:#1f9d55">Enviar por WhatsApp</button>
+      <button class="b sec" id="btnCorreo">Enviar por correo</button>
+      <button class="b sec" id="btnEnlace">Copiar enlace</button>
+      <span class="nota" id="eMsg"></span>
+    </div>
+    <p class="nota" id="eHist"></p>
   </div>
   <div id="docCont"></div>
   <div class="firmar noimprimir tarjeta" id="panelFirma">
@@ -229,8 +243,8 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
   </div>
   <div class="firmar noimprimir tarjeta oculto" id="panelRemoto">
     <h2>Firma registrada</h2>
-    <p>Envíe esta constancia a la oficina (por WhatsApp o correo). Puede descargar el archivo o copiar el código.</p>
-    <div class="acciones"><button class="b" id="btnDescConst">Descargar constancia</button><button class="b sec" id="btnCopiarConst">Copiar código</button><button class="b sec" onclick="window.print()">Guardar PDF</button></div>
+    <p>Envíe esta constancia a la oficina. Con "Enviar por WhatsApp" se abre WhatsApp con el archivo o el código listo para mandar.</p>
+    <div class="acciones"><button class="b" id="btnWaConst" style="background:#1f9d55;border-color:#1f9d55">Enviar por WhatsApp</button><button class="b sec" id="btnDescConst">Descargar constancia</button><button class="b sec" id="btnCopiarConst">Copiar código</button><button class="b sec" onclick="window.print()">Guardar PDF</button></div>
     <p class="nota" id="prMsg"></p>
   </div>
 </section>
@@ -459,10 +473,11 @@ function abrirDoc(id, notif) {
   const firmable = n.estado === 'pendiente' || n.estado === 'observada';
   $('#panelFirma').classList.toggle('oculto', !firmable || (modoRemoto && !!n.firma));
   $('#panelRemoto').classList.toggle('oculto', !(modoRemoto && n.firma));
-  ['#btnVolver', '#btnEnlace', '#btnEditar', '#btnAnular'].forEach(s => $(s).classList.toggle('oculto', modoRemoto));
+  ['#btnVolver', '#btnEditar', '#btnAnular'].forEach(s => $(s).classList.toggle('oculto', modoRemoto));
   $('#btnEditar').classList.toggle('oculto', modoRemoto || n.estado === 'firmada' || n.estado === 'anulada');
   $('#btnAnular').classList.toggle('oculto', modoRemoto || n.estado === 'anulada');
-  $('#btnEnlace').classList.toggle('oculto', modoRemoto || !firmable);
+  $('#panelEnvio').classList.toggle('oculto', modoRemoto || !firmable);
+  if (!modoRemoto) pintarEnvio(n);
   $('#pfNombre').textContent = n.tecnico;
   $('#pfTexto').textContent = textoAceptacion(n);
   $('#pfDni').value = ''; $('#pfAcepto').checked = false; $('#pfMsg').textContent = '';
@@ -537,14 +552,70 @@ $('#btnObservar').onclick = () => registrarRespuesta('observacion');
 // ---------- Firma remota ----------
 const b64 = s => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const deb64 = s => decodeURIComponent(escape(atob(s.replace(/-/g, '+').replace(/_/g, '/'))));
-$('#btnEnlace').onclick = async () => {
-  const n = docActual;
+// Si el reporte se abre como archivo local, el enlace apunta igual a la versión publicada.
+const URL_PUBLICA = 'https://mymtelecomunicacionessixseven-art.github.io/descuentos/';
+const baseEnlace = () => location.protocol === 'https:' ? location.origin + location.pathname : URL_PUBLICA;
+// Celular peruano de 9 dígitos → 51 + número; si ya trae código de país, se respeta.
+const telWa = t => { const d = String(t || '').replace(/\D/g, ''); return d.length === 9 ? '51' + d : d; };
+function enlaceFirma(n) {
   const datos = { id: n.id, numero: n.numero, tecnico: n.tecnico, dni: n.dni, cargo: n.cargo, fecha: n.fecha, lineas: n.lineas, cuotas: n.cuotas, total: n.total };
-  const url = location.href.split('#')[0] + '#firmar=' + b64(JSON.stringify(datos));
-  try { await navigator.clipboard.writeText(url); alert('Enlace copiado. Envíalo al técnico; al firmar, él te devolverá una constancia que importas en Registro → "Importar firma remota".\n\nEl enlace solo sirve si este reporte está publicado en una dirección web.'); }
+  const ofi = telWa(E.oficinaWa);
+  if (ofi) datos.ofi = ofi;
+  return baseEnlace() + '#firmar=' + b64(JSON.stringify(datos));
+}
+const nombreCorto = t => { const p = t.includes(',') ? t.split(',')[1] : t; return p.trim().split(/\s+/)[0].replace(/^./, c => c.toUpperCase()).replace(/(?<=.)./g, c => c.toLowerCase()); };
+function mensajeFirma(n) {
+  return `Hola ${nombreCorto(n.tecnico)}, ${EMPRESA.razon} te envía la notificación ${n.numero} por herramientas y/o materiales: S/ ${soles(n.total)} en ${n.cuotas.length} cuota(s).\n\nRevísala y fírmala desde tu celular en este enlace:\n${enlaceFirma(n)}\n\nAl firmar, envía la constancia a la oficina.`;
+}
+function pintarEnvio(n) {
+  const f = fichaTec(n.tecnico);
+  $('#eCel').value = f.celular || ''; $('#eCorreo').value = f.correo || ''; $('#eOfi').value = E.oficinaWa || '';
+  $('#eMsg').textContent = '';
+  $('#eHist').textContent = (n.envios || []).map(x => `Enviado por ${x.medio} a ${x.a} el ${new Date(x.fecha).toLocaleString('es-PE')}`).join(' · ');
+}
+function guardarContacto() {
+  const t = docActual.tecnico;
+  E.tecnicos[t] = { ...(E.tecnicos[t] || {}), celular: $('#eCel').value.trim(), correo: $('#eCorreo').value.trim() };
+  E.oficinaWa = $('#eOfi').value.trim();
+  guardar();
+}
+function registrarEnvio(medio, a) {
+  const n = E.notifs.find(x => x.id === docActual.id); if (!n) return;
+  (n.envios ??= []).push({ medio, a, fecha: new Date().toISOString() }); guardar(); pintarEnvio(n);
+}
+['#eCel', '#eCorreo', '#eOfi'].forEach(s => $(s).onchange = guardarContacto);
+$('#btnWa').onclick = () => {
+  const tel = telWa($('#eCel').value);
+  if (tel.length < 10) { $('#eMsg').textContent = 'Escribe el celular del técnico (9 dígitos).'; $('#eMsg').style.color = 'var(--mal)'; return; }
+  guardarContacto();
+  open('https://wa.me/' + tel + '?text=' + encodeURIComponent(mensajeFirma(docActual)), '_blank');
+  registrarEnvio('WhatsApp', $('#eCel').value.trim());
+};
+$('#btnCorreo').onclick = () => {
+  const correo = $('#eCorreo').value.trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(correo)) { $('#eMsg').textContent = 'Escribe un correo válido.'; $('#eMsg').style.color = 'var(--mal)'; return; }
+  guardarContacto();
+  const asunto = `Notificación de descuento ${docActual.numero} - MYM Telecomunicaciones`;
+  location.href = 'mailto:' + encodeURIComponent(correo) + '?subject=' + encodeURIComponent(asunto) + '&body=' + encodeURIComponent(mensajeFirma(docActual));
+  registrarEnvio('correo', correo);
+};
+$('#btnEnlace').onclick = async () => {
+  guardarContacto();
+  const url = enlaceFirma(docActual);
+  try { await navigator.clipboard.writeText(url); $('#eMsg').style.color = ''; $('#eMsg').textContent = 'Enlace copiado.'; }
   catch (e) { prompt('Copia este enlace:', url); }
 };
 function constancia() { return b64(JSON.stringify({ id: docActual.id, numero: docActual.numero, firma: docActual.firma, estado: docActual.estado })); }
+$('#btnWaConst').onclick = async () => {
+  const nombre = `constancia_${docActual.numero}.json`;
+  const archivo = new File([JSON.stringify({ constanciaMYM: constancia() })], nombre, { type: 'application/json' });
+  // En el celular se comparte el archivo (WhatsApp lo acepta); si no se puede, se manda el código como texto.
+  if (navigator.canShare && navigator.canShare({ files: [archivo] })) {
+    try { await navigator.share({ files: [archivo], title: nombre, text: `Constancia de firma ${docActual.numero} - ${docActual.tecnico}` }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const ofi = docActual.ofi ? docActual.ofi : '';
+  open('https://wa.me/' + ofi + '?text=' + encodeURIComponent(`Constancia de firma ${docActual.numero} - ${docActual.tecnico}:\n${constancia()}`), '_blank');
+};
 $('#btnDescConst').onclick = () => descargar(`constancia_${docActual.numero}.json`, JSON.stringify({ constanciaMYM: constancia() }));
 $('#btnCopiarConst').onclick = async () => { try { await navigator.clipboard.writeText(constancia()); $('#prMsg').textContent = 'Código copiado. Péguelo en WhatsApp para la oficina.'; } catch (e) { prompt('Copie el código:', constancia()); } };
 
@@ -618,14 +689,15 @@ $('#btnCsvTodo').onclick = () => {
 // ---------- Catálogo ----------
 $('#cBuscar').oninput = $('#cTipo').onchange = () => pintarCatalogo();
 function pintarCatalogo() {
-  $('#tTecs tbody').innerHTML = tecnicos().map(t => { const f = fichaTec(t); return `<tr><td>${esc(t)}</td><td><input data-tdni="${esc(t)}" value="${esc(f.dni)}" style="max-width:130px"></td><td><input data-tcargo="${esc(t)}" value="${esc(f.cargo)}"></td><td>${esc(f.situacion || '')}</td><td></td></tr>`; }).join('');
+  const campo = (t, k, v, ancho) => `<input data-t="${esc(t)}" data-k="${k}" value="${esc(v || '')}"${ancho ? ` style="max-width:${ancho}px"` : ''}>`;
+  $('#tTecs tbody').innerHTML = tecnicos().map(t => { const f = fichaTec(t); return `<tr><td>${esc(t)}</td><td>${campo(t, 'dni', f.dni, 110)}</td><td>${campo(t, 'cargo', f.cargo)}</td><td>${campo(t, 'celular', f.celular, 130)}</td><td>${campo(t, 'correo', f.correo)}</td><td>${esc(f.situacion || '')}</td></tr>`; }).join('');
   const q = $('#cBuscar').value.toLowerCase(), tp = $('#cTipo').value;
   $('#tCat tbody').innerHTML = catalogo().filter(i => (!tp || i.tipo === tp) && (!q || (i.codigo + ' ' + i.descripcion).toLowerCase().includes(q))).sort((a, b) => a.tipo.localeCompare(b.tipo) || a.descripcion.localeCompare(b.descripcion)).map(i => `<tr><td>${esc(i.codigo)}</td><td>${esc(i.descripcion)}</td><td>${esc(i.tipo)}</td><td class="n"><input type="number" step="0.01" data-precio="${esc(i.codigo)}" value="${i.precio || ''}" style="max-width:110px;text-align:right"></td></tr>`).join('');
   $('#catOrigen').textContent = CATALOGO.origen;
 }
 $('#tTecs').onchange = e => {
-  const t = e.target.dataset.tdni ?? e.target.dataset.tcargo; if (t == null) return;
-  E.tecnicos[t] = { ...(E.tecnicos[t] || {}), [e.target.dataset.tdni != null ? 'dni' : 'cargo']: e.target.value.trim() }; guardar();
+  const { t, k } = e.target.dataset; if (t == null) return;
+  E.tecnicos[t] = { ...(E.tecnicos[t] || {}), [k]: e.target.value.trim() }; guardar();
 };
 $('#tCat').onchange = e => {
   const c = e.target.dataset.precio; if (c == null) return;
