@@ -298,7 +298,10 @@ function primeraPorDefecto(iso) { const d = new Date(iso + 'T12:00:00'); return 
 
 function llenarSelects() {
   const ops = tecnicos().map(t => `<option>${esc(t)}</option>`).join('');
-  $('#fTec').innerHTML = (ops ? '<option value="">— Elegir —</option>' : '<option value="">— Carga el archivo de técnicos en "Técnicos y catálogo" —</option>') + ops;
+  const op = t => `<option>${esc(t)}</option>`;
+  const activos = tecnicos().filter(t => fichaTec(t).situacion !== 'Baja'), baja = tecnicos().filter(t => fichaTec(t).situacion === 'Baja');
+  $('#fTec').innerHTML = (ops ? '<option value="">— Elegir —</option>' : '<option value="">— Carga el archivo de técnicos en "Técnicos y catálogo" —</option>')
+    + (baja.length ? `<optgroup label="Activos">${activos.map(op).join('')}</optgroup><optgroup label="De baja">${baja.map(op).join('')}</optgroup>` : ops);
   $('#rTec').innerHTML = '<option value="">Todos los técnicos</option>' + ops;
   $('#dlItems').innerHTML = catalogo().map(i => `<option value="${esc(i.codigo + ' · ' + i.descripcion)}">${esc(i.tipo)}${i.precio ? ' · S/ ' + soles(i.precio) : ''}</option>`).join('');
 }
