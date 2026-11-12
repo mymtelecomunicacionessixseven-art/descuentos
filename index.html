@@ -113,6 +113,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
       <div><label>Precio unit. S/</label><input id="lPrecio" type="number" min="0" step="any"></div>
       <div style="align-self:end"><button class="b" id="btnAgregar">Agregar</button></div>
     </div>
+    <label style="display:flex;gap:6px;align-items:center;margin:-4px 0 8px;font-size:13px;color:#1b2333"><input type="checkbox" id="lFijar" style="width:auto"> Guardar este precio como predeterminado del artículo <span class="nota" id="lPrecioBase"></span></label>
     <p style="margin:-4px 0 10px"><a href="#" id="lnkNuevoMat">+ Nuevo material o herramienta que no está en la lista</a></p>
     <div id="cajaNuevoMat" class="oculto" style="border:1px dashed var(--azul);border-radius:8px;padding:12px;margin-bottom:12px;background:#f7faff">
       <b>Agregar al catálogo</b>
@@ -397,7 +398,26 @@ function itemDeTexto(txt) {
   const cod = txt.split(' · ')[0].trim();
   return catalogo().find(i => i.codigo === cod) || catalogo().find(i => i.descripcion.toLowerCase() === txt.trim().toLowerCase());
 }
-$('#lItem').onchange = () => { const it = itemDeTexto($('#lItem').value); if (it && it.precio) $('#lPrecio').value = it.precio; };
+// Precio predeterminado: se guarda en este navegador encima del precio del catálogo publicado.
+function fijarPrecio(codigo, precio) {
+  const it = catalogo().find(i => i.codigo === codigo); if (!it) return;
+  const i = E.items.findIndex(x => x.codigo === codigo);
+  const nuevo = { ...it, precio: r4(precio) };
+  if (i >= 0) E.items[i] = nuevo; else E.items.push(nuevo);
+  guardar(); llenarSelects();
+}
+const precioPublicado = c => (CATALOGO.items.find(i => i.codigo === c) || {}).precio || 0;
+$('#lItem').onchange = () => {
+  const it = itemDeTexto($('#lItem').value);
+  $('#lPrecio').value = it && it.precio ? it.precio : '';
+  // Sin precio en el catálogo: se propone guardar el que se escriba.
+  $('#lFijar').checked = !!it && !it.precio;
+  $('#lPrecioBase').textContent = it ? (it.precio ? `(actual: S/ ${pu(it.precio)})` : '(este artículo no tiene precio)') : '';
+};
+$('#lPrecio').oninput = () => {
+  const it = itemDeTexto($('#lItem').value);
+  if (it && it.precio && r4($('#lPrecio').value) !== r4(it.precio)) $('#lPrecioBase').textContent = `(actual: S/ ${pu(it.precio)}; márcalo para reemplazarlo)`;
+};
 $('#btnAgregar').onclick = () => {
   const txt = $('#lItem').value.trim();
   if (!txt) return msg('Escribe o elige un artículo.');
@@ -406,8 +426,11 @@ $('#btnAgregar').onclick = () => {
   const cantidad = +$('#lCant').value || 0, precio = r4($('#lPrecio').value);
   if (cantidad <= 0 || precio <= 0) return msg('Indica cantidad y precio mayores a cero.');
   borrador.lineas.push({ codigo: it.codigo, descripcion: it.descripcion, tipo: it.tipo, unidad: it.unidad || 'unidad', fechaEntrega: $('#lEntrega').value, situacion: $('#lSit').value, cantidad, precio, monto: r2(cantidad * precio) });
-  $('#lItem').value = ''; $('#lPrecio').value = ''; $('#lCant').value = 1;
+  const fijado = $('#lFijar').checked && precio !== r4(it.precio);
+  if (fijado) fijarPrecio(it.codigo, precio);
+  $('#lItem').value = ''; $('#lPrecio').value = ''; $('#lCant').value = 1; $('#lFijar').checked = false; $('#lPrecioBase').textContent = '';
   pintarLineas(); repartir(); msg('');
+  if (fijado) { $('#msgForm').style.color = 'var(--ok)'; $('#msgForm').textContent = `Precio predeterminado de ${it.descripcion}: S/ ${pu(precio)}.`; }
 };
 // ---------- Nuevo material desde la notificación ----------
 function agregarItem({ codigo, descripcion, tipo, precio, unidad }) {
@@ -739,7 +762,7 @@ function pintarCatalogo() {
   const campo = (t, k, v, ancho) => `<input data-t="${esc(t)}" data-k="${k}" value="${esc(v || '')}"${ancho ? ` style="max-width:${ancho}px"` : ''}>`;
   $('#tTecs tbody').innerHTML = tecnicos().map(t => { const f = fichaTec(t); return `<tr><td>${esc(t)}</td><td>${campo(t, 'dni', f.dni, 110)}</td><td>${campo(t, 'cargo', f.cargo)}</td><td>${campo(t, 'celular', f.celular, 130)}</td><td>${campo(t, 'correo', f.correo)}</td><td>${esc(f.situacion || '')}</td></tr>`; }).join('');
   const q = $('#cBuscar').value.toLowerCase(), tp = $('#cTipo').value;
-  $('#tCat tbody').innerHTML = catalogo().filter(i => (!tp || i.tipo === tp) && (!q || (i.codigo + ' ' + i.descripcion).toLowerCase().includes(q))).sort((a, b) => a.tipo.localeCompare(b.tipo) || a.descripcion.localeCompare(b.descripcion)).map(i => `<tr><td>${esc(i.codigo)}</td><td>${esc(i.descripcion)}${i.manual ? ' <span class="chip pendiente">agregado aquí</span>' : ''}</td><td>${esc(i.tipo)}</td><td class="n"><input type="number" step="any" data-precio="${esc(i.codigo)}" value="${i.precio || ''}" style="max-width:110px;text-align:right"></td><td>${i.manual ? `<button class="mini" data-quitar="${esc(i.codigo)}">Quitar</button>` : ''}</td></tr>`).join('');
+  $('#tCat tbody').innerHTML = catalogo().filter(i => (!tp || i.tipo === tp) && (!q || (i.codigo + ' ' + i.descripcion).toLowerCase().includes(q))).sort((a, b) => a.tipo.localeCompare(b.tipo) || a.descripcion.localeCompare(b.descripcion)).map(i => `<tr><td>${esc(i.codigo)}</td><td>${esc(i.descripcion)}${i.manual ? ' <span class="chip pendiente">agregado aquí</span>' : ''}</td><td>${esc(i.tipo)}</td><td class="n"><input type="number" step="any" data-precio="${esc(i.codigo)}" value="${i.precio || ''}" style="max-width:110px;text-align:right"></td><td>${i.manual ? `<button class="mini" data-quitar="${esc(i.codigo)}">Quitar</button>` : r4(i.precio) !== r4(precioPublicado(i.codigo)) ? `<button class="mini" data-restaurar="${esc(i.codigo)}" title="Volver a S/ ${pu(precioPublicado(i.codigo))}">Restaurar S/ ${pu(precioPublicado(i.codigo))}</button>` : ''}</td></tr>`).join('');
   $('#catOrigen').textContent = CATALOGO.origen;
 }
 $('#tTecs').onchange = e => {
@@ -748,16 +771,12 @@ $('#tTecs').onchange = e => {
 };
 $('#tCat').onchange = e => {
   const c = e.target.dataset.precio; if (c == null) return;
-  const it = catalogo().find(i => i.codigo === c);
-  const i = E.items.findIndex(x => x.codigo === c);
-  const nuevo = { ...it, precio: r4(e.target.value) };
-  if (i >= 0) E.items[i] = nuevo; else E.items.push(nuevo);
-  guardar(); llenarSelects();
+  fijarPrecio(c, e.target.value); pintarCatalogo();
 };
 $('#btnNuevoTec').onclick = () => { const t = $('#nTec').value.trim().toUpperCase(); if (!t) return; E.tecnicos[t] = E.tecnicos[t] || {}; guardar(); $('#nTec').value = ''; llenarSelects(); pintarCatalogo(); };
 // Quitar solo saca el artículo del catálogo; las notificaciones ya hechas conservan su detalle.
 $('#tCat').onclick = e => {
-  const c = e.target.dataset.quitar; if (!c) return;
+  const c = e.target.dataset.quitar || e.target.dataset.restaurar; if (!c) return;
   E.items = E.items.filter(x => x.codigo !== c); guardar(); llenarSelects(); pintarCatalogo();
 };
 $('#btnNuevoItem').onclick = () => {
